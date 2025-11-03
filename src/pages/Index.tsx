@@ -1,7 +1,11 @@
+
 import { useState, useRef, useEffect } from "react";
 import { configureStore, createSlice, PayloadAction } from "@reduxjs/toolkit";
 import { Provider, useDispatch, useSelector } from "react-redux";
-import { Send, FileText, CheckCircle2, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { Send, FileText, CheckCircle2, Loader2, ChevronLeft, ChevronRight, UploadCloud } from "lucide-react";
+import axios from "axios";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
 
 // Types
 interface Message {
@@ -14,7 +18,7 @@ interface Message {
 
 interface Source {
   title: string;
-  reference: string;
+  uri: string;
 }
 
 interface ChatState {
@@ -22,6 +26,7 @@ interface ChatState {
   isProcessing: boolean;
   documents: Document[];
   isIndexing: boolean;
+  indexedCount: number;
 }
 
 interface Document {
@@ -30,44 +35,39 @@ interface Document {
   status: "indexed" | "pending";
 }
 
-// Mock documents
-const MOCK_DOCUMENTS: Document[] = [
-  { id: "1", name: "Q3 Financial Report", status: "indexed" },
-  { id: "2", name: "Customer Service Manual", status: "indexed" },
-  { id: "3", name: "Product Specifications", status: "indexed" },
-  { id: "4", name: "CEO Transcript 2024", status: "indexed" },
-  { id: "5", name: "Market Analysis Report", status: "indexed" },
-];
-
 // Redux Slice
 const chatSlice = createSlice({
   name: "chat",
   initialState: {
     messages: [],
     isProcessing: false,
-    documents: MOCK_DOCUMENTS,
+    documents: [],
     isIndexing: false,
+    indexedCount: 0,
   } as ChatState,
   reducers: {
     addMessage: (state, action: PayloadAction<Message>) => {
       state.messages.push(action.payload);
     },
+    setMessages: (state, action: PayloadAction<Message[]>) => {
+        state.messages = action.payload;
+    },
     setIsProcessing: (state, action: PayloadAction<boolean>) => {
       state.isProcessing = action.payload;
+    },
+    setDocuments: (state, action: PayloadAction<Document[]>) => {
+      state.documents = action.payload;
     },
     setIsIndexing: (state, action: PayloadAction<boolean>) => {
       state.isIndexing = action.payload;
     },
-    simulateIndexing: (state) => {
-      state.documents = state.documents.map((doc) => ({
-        ...doc,
-        status: "indexed" as const,
-      }));
+    setIndexedCount: (state, action: PayloadAction<number>) => {
+      state.indexedCount = action.payload;
     },
   },
 });
 
-const { addMessage, setIsProcessing, setIsIndexing, simulateIndexing } = chatSlice.actions;
+const { addMessage, setMessages, setIsProcessing, setDocuments, setIsIndexing, setIndexedCount } = chatSlice.actions;
 
 // Redux Store
 const store = configureStore({
@@ -82,49 +82,33 @@ const store = configureStore({
 
 type RootState = ReturnType<typeof store.getState>;
 
-// Mock RAG Response Generator
-const generateMockResponse = (query: string): { content: string; sources: Source[] } => {
-  const lowerQuery = query.toLowerCase();
-
-  if (lowerQuery.includes("revenue") || lowerQuery.includes("q3") || lowerQuery.includes("financial")) {
-    return {
-      content:
-        "Based on our Q3 Financial Report, revenue increased by 23% year-over-year, reaching $4.2M in total revenue. The growth was primarily driven by our enterprise segment, which saw a 35% increase. Our customer acquisition cost decreased by 15%, while customer lifetime value increased by 20%.",
-      sources: [
-        { title: "Q3 Financial Report", reference: "Page 12, Section 3.2" },
-        { title: "Market Analysis Report", reference: "Page 8" },
-      ],
-    };
-  }
-
-  if (lowerQuery.includes("contact") || lowerQuery.includes("support") || lowerQuery.includes("customer")) {
-    return {
-      content:
-        "Our customer support team is available 24/7 through multiple channels. You can reach us via email at support@company.com, phone at 1-800-SUPPORT, or through our live chat. According to our service manual, average response time is under 2 hours for email inquiries and immediate for live chat.",
-      sources: [
-        { title: "Customer Service Manual", reference: "Chapter 2, Contact Information" },
-        { title: "Product Specifications", reference: "Support Section" },
-      ],
-    };
-  }
-
-  if (lowerQuery.includes("product") || lowerQuery.includes("feature") || lowerQuery.includes("specification")) {
-    return {
-      content:
-        "Our product suite includes three main offerings: Enterprise Platform (with advanced analytics and API access), Professional Plan (with team collaboration features), and Starter Plan (ideal for small teams). Each plan includes 99.9% uptime guarantee, real-time data synchronization, and dedicated support.",
-      sources: [
-        { title: "Product Specifications", reference: "Overview, Pages 1-5" },
-        { title: "CEO Transcript 2024", reference: "Product Roadmap Discussion" },
-      ],
-    };
-  }
-
-  return {
-    content:
-      "I can only provide information based on the indexed documents. Please ask questions related to our Q3 financial performance, customer support procedures, or product specifications. Feel free to rephrase your question to match the available document corpus.",
-    sources: [],
-  };
+// API Functions
+const getStatus = async () => {
+  const response = await axios.get(`${API_BASE_URL}/api/v1/status`);
+  return response.data;
 };
+
+const getDocuments = async () => {
+  const response = await axios.get(`${API_BASE_URL}/api/v1/documents`);
+  return response.data;
+};
+
+const uploadDocument = async (file: File) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await axios.post(`${API_BASE_URL}/api/v1/upload-document`, formData, {
+    headers: {
+      "Content-Type": "multipart/form-data",
+    },
+  });
+  return response.data;
+};
+
+const postChatMessage = async (query: string) => {
+  const response = await axios.post(`${API_BASE_URL}/api/v1/chat`, { query });
+  return response.data;
+};
+
 
 // Chat Message Component
 const ChatMessage = ({ message }: { message: Message }) => {
@@ -155,7 +139,7 @@ const ChatMessage = ({ message }: { message: Message }) => {
                   key={idx}
                   className="text-xs text-primary hover:text-primary-hover underline text-left transition-colors"
                 >
-                  Source {idx + 1}: {source.title} ({source.reference})
+                  Source {idx + 1}: {source.title}
                 </button>
               ))}
             </div>
@@ -177,16 +161,44 @@ const DocumentStatusPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: 
   const dispatch = useDispatch();
   const documents = useSelector((state: RootState) => state.chat.documents);
   const isIndexing = useSelector((state: RootState) => state.chat.isIndexing);
+  const indexedCount = useSelector((state: RootState) => state.chat.indexedCount);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleIndexDocuments = () => {
-    dispatch(setIsIndexing(true));
-    setTimeout(() => {
-      dispatch(simulateIndexing());
-      dispatch(setIsIndexing(false));
-    }, 2000);
+  const fetchStatusAndDocuments = async () => {
+    try {
+      const statusData = await getStatus();
+      dispatch(setIndexedCount(statusData.indexed_count));
+      const documentsData = await getDocuments();
+      dispatch(setDocuments(documentsData));
+    } catch (error) {
+      console.error("Failed to fetch status or documents", error);
+    }
   };
 
-  const indexedCount = documents.filter((d) => d.status === "indexed").length;
+  useEffect(() => {
+    fetchStatusAndDocuments();
+    const interval = setInterval(fetchStatusAndDocuments, 180000); // Poll every 3 minutes
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    dispatch(setIsIndexing(true));
+    try {
+      await uploadDocument(file);
+      await fetchStatusAndDocuments(); // Refresh data after upload
+    } catch (error) {
+      console.error("Failed to upload document", error);
+    } finally {
+      dispatch(setIsIndexing(false));
+    }
+  };
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
 
   return (
     <>
@@ -214,16 +226,16 @@ const DocumentStatusPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: 
           <div className="bg-primary-light rounded-lg p-4 mb-6 border border-primary/20">
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-semibold text-primary">Status</span>
-              {indexedCount === documents.length ? (
+              {indexedCount > 0 ? (
                 <CheckCircle2 className="w-5 h-5 text-primary" />
               ) : (
                 <Loader2 className="w-5 h-5 text-primary animate-spin" />
               )}
             </div>
             <p className="text-lg font-bold text-foreground">
-              {indexedCount}/{documents.length} Documents Indexed
+              {indexedCount} Documents Indexed
             </p>
-            {indexedCount === documents.length && (
+            {indexedCount > 0 && (
               <p className="text-xs text-primary mt-1">✓ RAG Model Ready</p>
             )}
           </div>
@@ -232,26 +244,39 @@ const DocumentStatusPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: 
           <div className="flex-1 overflow-auto">
             <h3 className="text-sm font-semibold text-foreground mb-3">Indexed Documents</h3>
             <div className="space-y-2">
-              {documents.map((doc) => (
-                <div
-                  key={doc.id}
-                  className="flex items-center gap-3 p-3 bg-secondary rounded-lg border border-border hover:border-primary/30 transition-colors"
-                >
-                  <FileText className="w-4 h-4 text-primary flex-shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{doc.name}</p>
+              {documents.length > 0 ? (
+                documents.map((doc) => (
+                  <div
+                    key={doc.id}
+                    className="flex items-center gap-3 p-3 bg-secondary rounded-lg border border-border hover:border-primary/30 transition-colors"
+                  >
+                    <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{doc.name}</p>
+                    </div>
+                    {doc.status === "indexed" && (
+                      <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
+                    )}
                   </div>
-                  {doc.status === "indexed" && (
-                    <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
-                  )}
+                ))
+              ) : (
+                <div className="text-center text-sm text-muted-foreground py-4">
+                  No documents indexed yet.
                 </div>
-              ))}
+              )}
             </div>
           </div>
 
-          {/* Index Button */}
+          {/* Upload Button */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleFileUpload}
+            className="hidden"
+            accept=".txt,.pdf"
+          />
           <button
-            onClick={handleIndexDocuments}
+            onClick={handleUploadClick}
             disabled={isIndexing}
             className="mt-6 w-full bg-primary hover:bg-primary-hover text-primary-foreground rounded-lg px-4 py-3 font-semibold shadow-md hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
           >
@@ -262,8 +287,8 @@ const DocumentStatusPanel = ({ isOpen, onToggle }: { isOpen: boolean; onToggle: 
               </>
             ) : (
               <>
-                <FileText className="w-4 h-4" />
-                Re-index Documents
+                <UploadCloud className="w-4 h-4" />
+                Upload Document
               </>
             )}
           </button>
@@ -314,21 +339,30 @@ const ChatInterface = () => {
     setInput("");
     dispatch(setIsProcessing(true));
 
-    // Simulate API call with delay
-    setTimeout(() => {
-      const { content, sources } = generateMockResponse(userMessage.content);
+    try {
+      const response = await postChatMessage(userMessage.content);
       
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: "assistant",
-        content,
-        sources,
+        content: response.response_text,
+        sources: response.sources,
         timestamp: new Date(),
       };
 
       dispatch(addMessage(aiMessage));
+    } catch (error) {
+      console.error("Failed to send message", error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: "Sorry, I'm having trouble connecting to the server. Please try again later.",
+        timestamp: new Date(),
+      };
+      dispatch(addMessage(errorMessage));
+    } finally {
       dispatch(setIsProcessing(false));
-    }, 2000);
+    }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -367,7 +401,7 @@ const ChatInterface = () => {
                     Welcome to RAG Q&A
                   </h2>
                   <p className="text-muted-foreground mb-6">
-                    Start asking questions about your indexed documents. I'll provide answers with
+                    Start by uploading a document. Then, ask questions and I'll provide answers with
                     references to the source materials.
                   </p>
                   <div className="bg-secondary rounded-lg p-4 text-left">
@@ -448,3 +482,4 @@ const Index = () => {
 };
 
 export default Index;
+
